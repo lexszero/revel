@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"strconv"
 	"time"
+
+	"github.com/golang/glog"
 )
 
 type Result interface {
@@ -84,7 +86,7 @@ func (r ErrorResult) Apply(req *Request, resp *Response) {
 
 	// Render it.
 	var b bytes.Buffer
-	err = tmpl.Render(&b, r.RenderArgs)
+	err = tmpl.Execute(&b, r.RenderArgs)
 
 	// If there was an error, print it in plain text.
 	if err != nil {
@@ -116,7 +118,7 @@ func (r *RenderTemplateResult) Apply(req *Request, resp *Response) {
 	// Handle panics when rendering templates.
 	defer func() {
 		if err := recover(); err != nil {
-			ERROR.Println(err)
+			glog.Error(err)
 			PlaintextErrorResult{fmt.Errorf("Template Execution Panic in %s:\n%s",
 				r.Template.Name(), err)}.Apply(req, resp)
 		}
@@ -133,8 +135,9 @@ func (r *RenderTemplateResult) Apply(req *Request, resp *Response) {
 	// In a prod mode, write the status, render, and hope for the best.
 	// (In a dev mode, always render to a temporary buffer first to avoid having
 	// error pages distorted by HTML already written)
+	defaultContentType := FormatToContentType(req.Format)
 	if chunked && !DevMode {
-		resp.WriteHeader(http.StatusOK, "text/html")
+		resp.WriteHeader(http.StatusOK, defaultContentType)
 		r.render(req, resp, out)
 		return
 	}
@@ -148,12 +151,12 @@ func (r *RenderTemplateResult) Apply(req *Request, resp *Response) {
 	if !chunked {
 		resp.Out.Header().Set("Content-Length", strconv.Itoa(b.Len()))
 	}
-	resp.WriteHeader(http.StatusOK, "text/html")
+	resp.WriteHeader(http.StatusOK, defaultContentType)
 	b.WriteTo(out)
 }
 
 func (r *RenderTemplateResult) render(req *Request, resp *Response, wr io.Writer) {
-	err := r.Template.Render(wr, r.RenderArgs)
+	err := r.Template.Execute(wr, r.RenderArgs)
 	if err == nil {
 		return
 	}
@@ -162,10 +165,10 @@ func (r *RenderTemplateResult) render(req *Request, resp *Response, wr io.Writer
 	templateName, line, description := parseTemplateError(err)
 	if templateName == "" {
 		templateName = r.Template.Name()
-		templateContent = r.Template.Content()
+		templateContent = MainTemplateLoader.SourceLines(templateName)
 	} else {
-		if tmpl, err := MainTemplateLoader.Template(templateName); err == nil {
-			templateContent = tmpl.Content()
+		if tmpl, _ := MainTemplateLoader.Template(templateName); tmpl != nil {
+			templateContent = MainTemplateLoader.SourceLines(templateName)
 		}
 	}
 	compileError := &Error{
@@ -176,7 +179,7 @@ func (r *RenderTemplateResult) render(req *Request, resp *Response, wr io.Writer
 		SourceLines: templateContent,
 	}
 	resp.Status = 500
-	ERROR.Printf("Template Execution Error (in %s): %s", templateName, description)
+	glog.Errorf("Template Execution Error (in %s): %s", templateName, description)
 	ErrorResult{r.RenderArgs, compileError}.Apply(req, resp)
 }
 
@@ -307,7 +310,7 @@ type RedirectToActionResult struct {
 func (r *RedirectToActionResult) Apply(req *Request, resp *Response) {
 	url, err := getRedirectUrl(r.val)
 	if err != nil {
-		ERROR.Println("Couldn't resolve redirect:", err.Error())
+		glog.Errorln("Couldn't resolve redirect:", err.Error())
 		ErrorResult{Error: err}.Apply(req, resp)
 		return
 	}

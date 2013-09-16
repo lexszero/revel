@@ -13,7 +13,6 @@ package harness
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/robfig/revel"
 	"io"
 	"net"
 	"net/http"
@@ -21,9 +20,12 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"github.com/golang/glog"
+	"github.com/robfig/revel"
 )
 
 var (
@@ -44,7 +46,7 @@ type Harness struct {
 
 func renderError(w http.ResponseWriter, r *http.Request, err error) {
 	req, resp := revel.NewRequest(r), revel.NewResponse(w)
-	c := revel.NewController(req, resp)
+	c := revel.NewController(req, resp, nil)
 	c.RenderError(err).Apply(req, resp)
 }
 
@@ -80,7 +82,7 @@ func NewHarness() *Harness {
 	// Get a template loader to render errors.
 	// Prefer the app's views/errors directory, and fall back to the stock error pages.
 	revel.MainTemplateLoader = revel.NewTemplateLoader(
-		[]string{path.Join(revel.RevelPath, "templates")})
+		[]string{filepath.Join(revel.RevelPath, "templates")})
 	revel.MainTemplateLoader.Refresh()
 
 	addr := revel.HttpAddr
@@ -121,7 +123,7 @@ func (h *Harness) Refresh() (err *revel.Error) {
 		h.app.Kill()
 	}
 
-	revel.TRACE.Println("Rebuild")
+	glog.V(1).Info("Rebuild")
 	h.app, err = Build()
 	if err != nil {
 		return
@@ -149,12 +151,13 @@ func (h *Harness) WatchFile(filename string) bool {
 // Run the harness, which listens for requests and proxies them to the app
 // server, which it runs and rebuilds as necessary.
 func (h *Harness) Run() {
+	revel.ConfigureLogging()
 	watcher = revel.NewWatcher()
 	watcher.Listen(h, revel.CodePaths...)
 
 	go func() {
 		addr := fmt.Sprintf("%s:%d", revel.HttpAddr, revel.HttpPort)
-		revel.INFO.Printf("Listening on %s", addr)
+		glog.Infof("Listening on %s", addr)
 
 		var err error
 		if revel.HttpSsl {
@@ -164,7 +167,7 @@ func (h *Harness) Run() {
 			err = http.ListenAndServe(addr, h)
 		}
 		if err != nil {
-			revel.ERROR.Fatalln("Failed to start reverse proxy:", err)
+			glog.Fatalln("Failed to start reverse proxy:", err)
 		}
 	}()
 
@@ -182,13 +185,13 @@ func (h *Harness) Run() {
 func getFreePort() (port int) {
 	conn, err := net.Listen("tcp", ":0")
 	if err != nil {
-		revel.ERROR.Fatal(err)
+		glog.Fatal(err)
 	}
 
 	port = conn.Addr().(*net.TCPAddr).Port
 	err = conn.Close()
 	if err != nil {
-		revel.ERROR.Fatal(err)
+		glog.Fatal(err)
 	}
 	return port
 }
@@ -199,7 +202,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string) {
 	d, err := net.Dial("tcp", host)
 	if err != nil {
 		http.Error(w, "Error contacting backend server.", 500)
-		revel.ERROR.Printf("Error dialing websocket backend %s: %v", host, err)
+		glog.Errorf("Error dialing websocket backend %s: %v", host, err)
 		return
 	}
 	hj, ok := w.(http.Hijacker)
@@ -209,7 +212,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string) {
 	}
 	nc, _, err := hj.Hijack()
 	if err != nil {
-		revel.ERROR.Printf("Hijack error: %v", err)
+		glog.Errorf("Hijack error: %v", err)
 		return
 	}
 	defer nc.Close()
@@ -217,7 +220,7 @@ func proxyWebsocket(w http.ResponseWriter, r *http.Request, host string) {
 
 	err = r.Write(d)
 	if err != nil {
-		revel.ERROR.Printf("Error copying request to target: %v", err)
+		glog.Errorf("Error copying request to target: %v", err)
 		return
 	}
 

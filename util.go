@@ -2,22 +2,18 @@ package revel
 
 import (
 	"bytes"
-	"io"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/golang/glog"
 )
 
-// Add some more methods to the default Template.
-type ExecutableTemplate interface {
-	Execute(io.Writer, interface{}) error
-}
-
-// Execute a template and returns the result as a string.
-func ExecuteTemplate(tmpl ExecutableTemplate, data interface{}) string {
+// ExecuteTemplate renders a template into a string.
+func ExecuteTemplate(tmpl Template, data interface{}) string {
 	var b bytes.Buffer
 	tmpl.Execute(&b, data)
 	return b.String()
@@ -86,7 +82,7 @@ func LoadMimeConfig() {
 	var err error
 	mimeConfig, err = LoadConfig("mime-types.conf")
 	if err != nil {
-		ERROR.Fatalln("Failed to load mime type config:", err)
+		glog.Fatalln("Failed to load mime type config:", err)
 	}
 }
 

@@ -11,6 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"code.google.com/p/go.net/websocket"
+	"github.com/golang/glog"
 )
 
 type Controller struct {
@@ -25,6 +28,8 @@ type Controller struct {
 	Response *Response
 	Result   Result
 
+	Websocket *websocket.Conn
+
 	Flash      Flash                  // User cookie, cleared after 1 request.
 	Session    Session                // Session, stored in cookie, signed.
 	Params     *Params                // Parameters from URL and form (including multipart).
@@ -33,12 +38,13 @@ type Controller struct {
 	Validation *Validation            // Data validation helpers
 }
 
-func NewController(req *Request, resp *Response) *Controller {
+func NewController(req *Request, resp *Response, ws *websocket.Conn) *Controller {
 	return &Controller{
-		Request:  req,
-		Response: resp,
-		Params:   new(Params),
-		Args:     map[string]interface{}{},
+		Request:   req,
+		Response:  resp,
+		Websocket: ws,
+		Params:    new(Params),
+		Args:      map[string]interface{}{},
 		RenderArgs: map[string]interface{}{
 			"RunMode": RunMode,
 			"DevMode": DevMode,
@@ -57,6 +63,14 @@ func (c *Controller) SetCookie(cookie *http.Cookie) {
 }
 
 func (c *Controller) RenderError(err error) Result {
+	// If it's a 5xx error, also log it to error.
+	status := c.Response.Status
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+	if status/100 == 5 {
+		glog.Errorf("%d %s: %s", status, http.StatusText(status), err)
+	}
 	return ErrorResult{c.RenderArgs, err}
 }
 
@@ -73,11 +87,40 @@ func (c *Controller) RenderError(err error) Result {
 //
 // This action will render views/Users/ShowUser.html, passing in an extra
 // key-value "user": (User).
+//
+// Content negotiation
+//
+// The template selected depends on the request's format (html, json, xml, txt),
+// (which is derived from the Accepts header).  For example, if Request.Format
+// was "json", then the above example would look for the
+// views/Users/ShowUser.json template instead.
+//
+// If no template is found and the format is one of "json" or "xml",
+// then Render will instead serialize the first argument into that format.
 func (c *Controller) Render(extraRenderArgs ...interface{}) Result {
+	templatePath := c.Name + "/" + c.MethodType.Name + "." + c.Request.Format
+
 	// Get the calling function name.
 	_, _, line, ok := runtime.Caller(1)
 	if !ok {
-		ERROR.Println("Failed to get Caller information")
+		glog.Error("Failed to get Caller information")
+	}
+
+	// If not HTML, first check if the template is present.
+	template, err := MainTemplateLoader.Template(templatePath)
+
+	// If not, and there is an arg, serialize that if it's xml or json.
+	if template == nil {
+		if len(extraRenderArgs) > 0 {
+			switch c.Request.Format {
+			case "xml":
+				return c.RenderXml(extraRenderArgs[0])
+			case "json":
+				return c.RenderJson(extraRenderArgs[0])
+			}
+		}
+		// Else, render a 404 error saying we couldn't find the template.
+		return c.NotFound(err.Error())
 	}
 
 	// Get the extra RenderArgs passed in.
@@ -87,21 +130,23 @@ func (c *Controller) Render(extraRenderArgs ...interface{}) Result {
 				c.RenderArgs[renderArgNames[i]] = extraRenderArg
 			}
 		} else {
-			ERROR.Println(len(renderArgNames), "RenderArg names found for",
+			glog.Errorln(len(renderArgNames), "RenderArg names found for",
 				len(extraRenderArgs), "extra RenderArgs")
 		}
 	} else {
-		ERROR.Println("No RenderArg names found for Render call on line", line,
+		glog.Errorln("No RenderArg names found for Render call on line", line,
 			"(Method", c.MethodType.Name, ")")
 	}
 
-	return c.RenderTemplate(c.Name + "/" + c.MethodType.Name + "." + c.Request.Format)
+	return &RenderTemplateResult{
+		Template:   template,
+		RenderArgs: c.RenderArgs,
+	}
 }
 
 // A less magical way to render a template.
 // Renders the given template, using the current RenderArgs.
 func (c *Controller) RenderTemplate(templatePath string) Result {
-
 	// Get the Template.
 	template, err := MainTemplateLoader.Template(templatePath)
 	if err != nil {
@@ -179,7 +224,7 @@ func (c *Controller) RenderFile(file *os.File, delivery ContentDisposition) Resu
 		fileInfo, err = file.Stat()
 	)
 	if err != nil {
-		WARN.Println("RenderFile error:", err)
+		glog.Warningln("RenderFile error:", err)
 	}
 	if fileInfo != nil {
 		modtime = fileInfo.ModTime()
@@ -360,5 +405,5 @@ func RegisterController(c interface{}, methods []*MethodType) {
 		Methods:           methods,
 		ControllerIndexes: findControllers(elem),
 	}
-	TRACE.Printf("Registered controller: %s", elem.Name())
+	glog.V(1).Infof("Registered controller: %s", elem.Name())
 }

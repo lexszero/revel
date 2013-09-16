@@ -2,12 +2,13 @@ package revel
 
 import (
 	"bytes"
-	"code.google.com/p/go.net/websocket"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/golang/glog"
 )
 
 type Request struct {
@@ -16,7 +17,6 @@ type Request struct {
 	Format          string // "html", "xml", "json", or "txt"
 	AcceptLanguages AcceptLanguages
 	Locale          string
-	Websocket       *websocket.Conn
 }
 
 type Response struct {
@@ -70,21 +70,37 @@ func ResolveFormat(req *http.Request) string {
 
 	switch {
 	case accept == "",
-		strings.HasPrefix(accept, "*/*"), // */
+		strings.HasPrefix(accept, "*/*"),
 		strings.Contains(accept, "application/xhtml"),
 		strings.Contains(accept, "text/html"):
 		return "html"
+	case strings.Contains(accept, "application/json"),
+		strings.Contains(accept, "text/javascript"):
+		return "json"
 	case strings.Contains(accept, "application/xml"),
 		strings.Contains(accept, "text/xml"):
 		return "xml"
 	case strings.Contains(accept, "text/plain"):
 		return "txt"
-	case strings.Contains(accept, "application/json"),
-		strings.Contains(accept, "text/javascript"):
-		return "json"
 	}
 
 	return "html"
+}
+
+// FormatToContentType returns an appropriate default content type for the
+// response, given the request format.
+func FormatToContentType(format string) string {
+	switch format {
+	case "html":
+		return "text/html"
+	case "txt":
+		return "text/plain"
+	case "xml":
+		return "text/xml"
+	case "json":
+		return "application/json"
+	}
+	panic("unrecognized format: " + format)
 }
 
 // A single language from the Accept-Language HTTP header.
@@ -130,7 +146,7 @@ func ResolveAcceptLanguage(req *http.Request) AcceptLanguages {
 		if qualifiedRange := strings.Split(languageRange, ";q="); len(qualifiedRange) == 2 {
 			quality, error := strconv.ParseFloat(qualifiedRange[1], 32)
 			if error != nil {
-				WARN.Printf("Detected malformed Accept-Language header quality in '%s', assuming quality is 1", languageRange)
+				glog.Warningf("Detected malformed Accept-Language header quality in '%s', assuming quality is 1", languageRange)
 				acceptLanguages[i] = AcceptLanguage{qualifiedRange[0], 1}
 			} else {
 				acceptLanguages[i] = AcceptLanguage{qualifiedRange[0], float32(quality)}

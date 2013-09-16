@@ -1,8 +1,6 @@
 package revel
 
 import (
-	"io/ioutil"
-	"log"
 	"net/http"
 	"testing"
 	"time"
@@ -116,24 +114,24 @@ func TestHasAcceptLanguageHeader(t *testing.T) {
 func TestBeforeRequest(t *testing.T) {
 	loadTestI18nConfig(t)
 
-	c := NewController(buildEmptyRequest(), nil)
+	c := NewController(buildEmptyRequest(), nil, nil)
 	if I18nFilter(c, NilChain); c.Request.Locale != "" {
 		t.Errorf("Expected to find current language '%s' in controller, found '%s' instead", "", c.Request.Locale)
 	}
 
-	c = NewController(buildRequestWithCookie("APP_LANG", "en-US"), nil)
+	c = NewController(buildRequestWithCookie("APP_LANG", "en-US"), nil, nil)
 	if I18nFilter(c, NilChain); c.Request.Locale != "en-US" {
 		t.Errorf("Expected to find current language '%s' in controller, found '%s' instead", "en-US", c.Request.Locale)
 	}
 
-	c = NewController(buildRequestWithAcceptLanguages("en-GB", "en-US"), nil)
+	c = NewController(buildRequestWithAcceptLanguages("en-GB", "en-US"), nil, nil)
 	if I18nFilter(c, NilChain); c.Request.Locale != "en-GB" {
 		t.Errorf("Expected to find current language '%s' in controller, found '%s' instead", "en-GB", c.Request.Locale)
 	}
 }
 
 func BenchmarkI18nLoadMessages(b *testing.B) {
-	excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
+	// TODO: excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
 
 	for i := 0; i < b.N; i++ {
 		loadMessages(testDataPath)
@@ -147,7 +145,7 @@ func BenchmarkI18nMessage(b *testing.B) {
 }
 
 func BenchmarkI18nMessageWithArguments(b *testing.B) {
-	excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
+	// TODO: excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
 
 	for i := 0; i < b.N; i++ {
 		Message("en", "arguments.string", "Vincent Hanna")
@@ -155,7 +153,7 @@ func BenchmarkI18nMessageWithArguments(b *testing.B) {
 }
 
 func BenchmarkI18nMessageWithFoldingAndArguments(b *testing.B) {
-	excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
+	// TODO: excludeFromTimer(b, func() { TRACE = log.New(ioutil.Discard, "", 0) })
 
 	for i := 0; i < b.N; i++ {
 		Message("en", "folded.arguments", 12345)

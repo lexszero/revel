@@ -1,10 +1,12 @@
 package revel
 
 import (
-	"code.google.com/p/go.net/websocket"
 	"fmt"
 	"net/http"
 	"time"
+
+	"code.google.com/p/go.net/websocket"
+	"github.com/golang/glog"
 )
 
 var (
@@ -31,9 +33,8 @@ func handleInternal(w http.ResponseWriter, r *http.Request, ws *websocket.Conn) 
 	var (
 		req  = NewRequest(r)
 		resp = NewResponse(w)
-		c    = NewController(req, resp)
+		c    = NewController(req, resp, ws)
 	)
-	req.Websocket = ws
 
 	Filters[0](c, Filters[1:])
 	if c.Result != nil {
@@ -67,7 +68,7 @@ func Run(port int) {
 	// If desired (or by default), create a watcher for templates and routes.
 	// The watcher calls Refresh() on things on the first request.
 	if MainWatcher != nil && Config.BoolDefault("watch.templates", true) {
-		MainWatcher.Listen(MainTemplateLoader, MainTemplateLoader.paths...)
+		MainWatcher.Listen(MainTemplateLoader, TemplatePaths...)
 	} else {
 		MainTemplateLoader.Refresh()
 	}
@@ -85,10 +86,10 @@ func Run(port int) {
 	}()
 
 	if HttpSsl {
-		ERROR.Fatalln("Failed to listen:",
+		glog.Fatalln("Failed to listen:",
 			Server.ListenAndServeTLS(HttpSslCert, HttpSslKey))
 	} else {
-		ERROR.Fatalln("Failed to listen:", Server.ListenAndServe())
+		glog.Fatalln("Failed to listen:", Server.ListenAndServe())
 	}
 }
 

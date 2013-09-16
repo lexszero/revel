@@ -20,7 +20,7 @@ func getRecordedCookie(recorder *httptest.ResponseRecorder, name string) (*http.
 
 func validationTester(req *Request, fn func(c *Controller)) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
-	c := NewController(req, NewResponse(recorder))
+	c := NewController(req, NewResponse(recorder), nil)
 	ValidationFilter(c, []Filter{func(c *Controller, _ []Filter) {
 		fn(c)
 	}})

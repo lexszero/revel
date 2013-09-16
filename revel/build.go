@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"github.com/robfig/revel"
-	"github.com/robfig/revel/harness"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/golang/glog"
+	"github.com/robfig/revel"
+	"github.com/robfig/revel/harness"
 )
 
 var cmdBuild = &Command{
@@ -38,11 +39,12 @@ func buildApp(args []string) {
 	appImportPath, destPath := args[0], args[1]
 	if !revel.Initialized {
 		revel.Init("", appImportPath, "")
+		revel.LoadModules()
 	}
 
 	// First, verify that it is either already empty or looks like a previous
 	// build (to avoid clobbering anything)
-	if exists(destPath) && !empty(destPath) && !exists(path.Join(destPath, "run.sh")) {
+	if exists(destPath) && !empty(destPath) && !exists(filepath.Join(destPath, "run.sh")) {
 		errorf("Abort: %s exists and does not look like a build directory.", destPath)
 	}
 
@@ -59,12 +61,12 @@ func buildApp(args []string) {
 	// - app
 
 	// Revel and the app are in a directory structure mirroring import path
-	srcPath := path.Join(destPath, "src")
-	tmpRevelPath := path.Join(srcPath, filepath.FromSlash(revel.REVEL_IMPORT_PATH))
-	mustCopyFile(path.Join(destPath, filepath.Base(app.BinaryPath)), app.BinaryPath)
-	mustCopyDir(path.Join(tmpRevelPath, "conf"), path.Join(revel.RevelPath, "conf"), nil)
-	mustCopyDir(path.Join(tmpRevelPath, "templates"), path.Join(revel.RevelPath, "templates"), nil)
-	mustCopyDir(path.Join(srcPath, filepath.FromSlash(appImportPath)), revel.BasePath, nil)
+	srcPath := filepath.Join(destPath, "src")
+	tmpRevelPath := filepath.Join(srcPath, filepath.FromSlash(revel.REVEL_IMPORT_PATH))
+	mustCopyFile(filepath.Join(destPath, filepath.Base(app.BinaryPath)), app.BinaryPath)
+	mustCopyDir(filepath.Join(tmpRevelPath, "conf"), filepath.Join(revel.RevelPath, "conf"), nil)
+	mustCopyDir(filepath.Join(tmpRevelPath, "templates"), filepath.Join(revel.RevelPath, "templates"), nil)
+	mustCopyDir(filepath.Join(srcPath, filepath.FromSlash(appImportPath)), revel.BasePath, nil)
 
 	// Find all the modules used and copy them over.
 	config := revel.Config.Raw()
@@ -81,13 +83,13 @@ func buildApp(args []string) {
 			}
 			modulePath, err := revel.ResolveImportPath(moduleImportPath)
 			if err != nil {
-				revel.ERROR.Fatalln("Failed to load module %s: %s", key[len("module."):], err)
+				glog.Fatalf("Failed to load module %s: %s", key[len("module."):], err)
 			}
 			modulePaths[moduleImportPath] = modulePath
 		}
 	}
 	for importPath, fsPath := range modulePaths {
-		mustCopyDir(path.Join(srcPath, importPath), fsPath, nil)
+		mustCopyDir(filepath.Join(srcPath, filepath.FromSlash(importPath)), fsPath, nil)
 	}
 
 	tmplData := map[string]interface{}{
@@ -96,12 +98,12 @@ func buildApp(args []string) {
 	}
 
 	mustRenderTemplate(
-		path.Join(destPath, "run.sh"),
-		path.Join(revel.RevelPath, "revel", "package_run.sh.template"),
+		filepath.Join(destPath, "run.sh"),
+		filepath.Join(revel.RevelPath, "revel", "package_run.sh.template"),
 		tmplData)
 
 	mustRenderTemplate(
-		path.Join(destPath, "run.bat"),
-		path.Join(revel.RevelPath, "revel", "package_run.bat.template"),
+		filepath.Join(destPath, "run.bat"),
+		filepath.Join(revel.RevelPath, "revel", "package_run.bat.template"),
 		tmplData)
 }
