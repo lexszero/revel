@@ -59,7 +59,7 @@ func ParseParams(params *Params, req *Request) {
 // Bind looks for the named parameter, converts it to the requested type, and
 // writes it into "dest", which must be settable.  If the value can not be
 // parsed, "dest" is set to the zero value.
-func (p *Params) Bind(dest interface{}, name string) {
+func (p *Params) Bind(dest interface{}, name string, valid *Validation) error {
 	value := reflect.ValueOf(dest)
 	if value.Kind() != reflect.Ptr {
 		panic("revel/params: non-pointer passed to Bind: " + name)
@@ -68,7 +68,8 @@ func (p *Params) Bind(dest interface{}, name string) {
 	if !value.CanSet() {
 		panic("revel/params: non-settable variable passed to Bind: " + name)
 	}
-	value.Set(Bind(p, name, value.Type()))
+	value.Set(Bind(p, valid, name, value.Type()))
+	return nil
 }
 
 // calcValues returns a unified view of the component param maps.

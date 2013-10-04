@@ -10,6 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"errors"
+//	"log"
+)
+
+var (
+	ErrBadValue = errors.New("Bad value")
 )
 
 // A Binder translates between string parameters and Go data structures.
@@ -32,7 +38,7 @@ type Binder struct {
 	//   Bind(params, "user", User): User{Name:"rob"}
 	//
 	// Note that only exported struct fields may be bound.
-	Bind func(params *Params, name string, typ reflect.Type) reflect.Value
+	Bind func(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value
 
 	// Unbind serializes a given value to one or more URL parameters of the given
 	// name.
@@ -40,13 +46,17 @@ type Binder struct {
 }
 
 // An adapter for easily making one-key-value binders.
-func ValueBinder(f func(value string, typ reflect.Type) reflect.Value) func(*Params, string, reflect.Type) reflect.Value {
-	return func(params *Params, name string, typ reflect.Type) reflect.Value {
+func ValueBinder(f func(value string, typ reflect.Type) (reflect.Value, error)) func(*Params, *Validation, string, reflect.Type) reflect.Value {
+	return func(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 		vals, ok := params.Values[name]
 		if !ok || len(vals) == 0 {
 			return reflect.Zero(typ)
 		}
-		return f(vals[0], typ)
+		v, err := f(vals[0], typ)
+		if err != nil {
+			valid.KeyError(name, err.Error())
+		}
+		return v
 	}
 }
 
@@ -69,18 +79,18 @@ var (
 	DateTimeFormat string
 
 	IntBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
 			if len(val) == 0 {
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), nil
 			}
 			intValue, err := strconv.ParseInt(val, 10, 64)
 			if err != nil {
 				WARN.Println(err)
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), err
 			}
 			pValue := reflect.New(typ)
 			pValue.Elem().SetInt(intValue)
-			return pValue.Elem()
+			return pValue.Elem(), nil
 		}),
 		Unbind: func(output map[string]string, key string, val interface{}) {
 			output[key] = fmt.Sprintf("%d", val)
@@ -88,18 +98,18 @@ var (
 	}
 
 	UintBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
 			if len(val) == 0 {
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), nil
 			}
 			uintValue, err := strconv.ParseUint(val, 10, 64)
 			if err != nil {
 				WARN.Println(err)
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), err
 			}
 			pValue := reflect.New(typ)
 			pValue.Elem().SetUint(uintValue)
-			return pValue.Elem()
+			return pValue.Elem(), nil
 		}),
 		Unbind: func(output map[string]string, key string, val interface{}) {
 			output[key] = fmt.Sprintf("%d", val)
@@ -107,18 +117,18 @@ var (
 	}
 
 	FloatBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
 			if len(val) == 0 {
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), nil
 			}
 			floatValue, err := strconv.ParseFloat(val, 64)
 			if err != nil {
 				WARN.Println(err)
-				return reflect.Zero(typ)
+				return reflect.Zero(typ), err
 			}
 			pValue := reflect.New(typ)
 			pValue.Elem().SetFloat(floatValue)
-			return pValue.Elem()
+			return pValue.Elem(), err
 		}),
 		Unbind: func(output map[string]string, key string, val interface{}) {
 			output[key] = fmt.Sprintf("%f", val)
@@ -126,8 +136,8 @@ var (
 	}
 
 	StringBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
-			return reflect.ValueOf(val)
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
+			return reflect.ValueOf(val), nil
 		}),
 		Unbind: func(output map[string]string, name string, val interface{}) {
 			output[name] = val.(string)
@@ -139,14 +149,16 @@ var (
 	// "on" and "" (a checkbox)
 	// "1" and "0" (why not)
 	BoolBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
 			v := strings.TrimSpace(strings.ToLower(val))
 			switch v {
 			case "true", "on", "1":
-				return reflect.ValueOf(true)
+				return reflect.ValueOf(true), nil
+			case "false", "off", "0":
+				return reflect.ValueOf(false), nil
 			}
 			// Return false by default.
-			return reflect.ValueOf(false)
+			return reflect.ValueOf(false), ErrBadValue
 		}),
 		Unbind: func(output map[string]string, name string, val interface{}) {
 			output[name] = fmt.Sprintf("%t", val)
@@ -154,8 +166,8 @@ var (
 	}
 
 	PointerBinder = Binder{
-		Bind: func(params *Params, name string, typ reflect.Type) reflect.Value {
-			return Bind(params, name, typ.Elem()).Addr()
+		Bind: func(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
+			return Bind(params, valid, name, typ.Elem()).Addr()
 		},
 		Unbind: func(output map[string]string, name string, val interface{}) {
 			Unbind(output, name, reflect.ValueOf(val).Elem().Interface())
@@ -163,13 +175,13 @@ var (
 	}
 
 	TimeBinder = Binder{
-		Bind: ValueBinder(func(val string, typ reflect.Type) reflect.Value {
+		Bind: ValueBinder(func(val string, typ reflect.Type) (reflect.Value, error) {
 			for _, f := range TimeFormats {
 				if r, err := time.Parse(f, val); err == nil {
-					return reflect.ValueOf(r)
+					return reflect.ValueOf(r), nil
 				}
 			}
-			return reflect.Zero(typ)
+			return reflect.Zero(typ), ErrBadValue
 		}),
 		Unbind: func(output map[string]string, name string, val interface{}) {
 			var (
@@ -240,7 +252,7 @@ type sliceValue struct {
 // elements, and then sets them to their appropriate location in the slice.
 // If elements are provided without an explicit index, they are added (in
 // unspecified order) to the end of the slice.
-func bindSlice(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindSlice(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	// Collect an array of slice elements with their indexes (and the max index).
 	maxIndex := -1
 	numNoIndex := 0
@@ -267,7 +279,7 @@ func bindSlice(params *Params, name string, typ reflect.Type) reflect.Value {
 			}
 			sliceValues = append(sliceValues, sliceValue{
 				index: index,
-				value: Bind(params, key[:subKeyIndex], typ.Elem()),
+				value: Bind(params, valid, key[:subKeyIndex], typ.Elem()),
 			})
 			return
 		}
@@ -278,16 +290,17 @@ func bindSlice(params *Params, name string, typ reflect.Type) reflect.Value {
 			// Unindexed values can only be direct-bound.
 			sliceValues = append(sliceValues, sliceValue{
 				index: -1,
-				value: BindValue(val, typ.Elem()),
+				value: BindValue(valid, "", val, typ.Elem()),
 			})
 		}
 
 		for _, fileHeader := range files {
 			sliceValues = append(sliceValues, sliceValue{
 				index: -1,
-				value: BindFile(fileHeader, typ.Elem()),
+				value: BindFile(valid, "", fileHeader, typ.Elem()),
 			})
 		}
+		return
 	}
 
 	for key, vals := range params.Values {
@@ -297,6 +310,7 @@ func bindSlice(params *Params, name string, typ reflect.Type) reflect.Value {
 		processElement(key, nil, fileHeaders)
 	}
 
+//	log.Printf("%#v", sliceValues)
 	resultArray := reflect.MakeSlice(typ, maxIndex+1, maxIndex+1+numNoIndex)
 	for _, sv := range sliceValues {
 		if sv.index != -1 {
@@ -326,7 +340,7 @@ func unbindSlice(output map[string]string, name string, val interface{}) {
 	}
 }
 
-func bindStruct(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindStruct(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	result := reflect.New(typ).Elem()
 	fieldValues := make(map[string]reflect.Value)
 	for key, _ := range params.Values {
@@ -351,7 +365,7 @@ func bindStruct(params *Params, name string, typ reflect.Type) reflect.Value {
 				WARN.Println("W: bindStruct: Field not settable:", fieldName)
 				continue
 			}
-			boundVal := Bind(params, key[:len(name)+1+fieldLen], fieldValue.Type())
+			boundVal := Bind(params, valid, key[:len(name)+1+fieldLen], fieldValue.Type())
 			fieldValue.Set(boundVal)
 			fieldValues[fieldName] = boundVal
 		}
@@ -386,7 +400,7 @@ func getMultipartFile(params *Params, name string) multipart.File {
 	return nil
 }
 
-func bindFile(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindFile(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	reader := getMultipartFile(params, name)
 	if reader == nil {
 		return reflect.Zero(typ)
@@ -400,40 +414,39 @@ func bindFile(params *Params, name string, typ reflect.Type) reflect.Value {
 	// Otherwise, have to store it.
 	tmpFile, err := ioutil.TempFile("", "revel-upload")
 	if err != nil {
-		WARN.Println("Failed to create a temp file to store upload:", err)
+		valid.KeyError(name, "Failed to create a temp file to store upload:", err)
 		return reflect.Zero(typ)
 	}
 
 	// Register it to be deleted after the request is done.
 	params.tmpFiles = append(params.tmpFiles, tmpFile)
 
-	_, err = io.Copy(tmpFile, reader)
-	if err != nil {
-		WARN.Println("Failed to copy upload to temp file:", err)
+	if _, err = io.Copy(tmpFile, reader); err != nil {
+		valid.KeyError(name, "Failed to copy upload to temp file:", err)
 		return reflect.Zero(typ)
 	}
 
-	_, err = tmpFile.Seek(0, 0)
-	if err != nil {
-		WARN.Println("Failed to seek to beginning of temp file:", err)
+	if _, err = tmpFile.Seek(0, 0); err != nil {
+		valid.KeyError(name, "Failed to seek to beginning of temp file:", err)
 		return reflect.Zero(typ)
 	}
 
 	return reflect.ValueOf(tmpFile)
 }
 
-func bindByteArray(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindByteArray(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	if reader := getMultipartFile(params, name); reader != nil {
 		b, err := ioutil.ReadAll(reader)
-		if err == nil {
-			return reflect.ValueOf(b)
+		if err != nil {
+			valid.KeyError(name, "Error reading uploaded file contents:", err)
+			return reflect.Zero(typ)
 		}
-		WARN.Println("Error reading uploaded file contents:", err)
+		return reflect.ValueOf(b)
 	}
 	return reflect.Zero(typ)
 }
 
-func bindReadSeeker(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindReadSeeker(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	if reader := getMultipartFile(params, name); reader != nil {
 		return reflect.ValueOf(reader.(io.ReadSeeker))
 	}
@@ -442,7 +455,7 @@ func bindReadSeeker(params *Params, name string, typ reflect.Type) reflect.Value
 
 // bindMap converts parameters using map syntax into the corresponding map. e.g.:
 //   params["a[5]"]=foo, name="a", typ=map[int]string => map[int]string{5: "foo"}
-func bindMap(params *Params, name string, typ reflect.Type) reflect.Value {
+func bindMap(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	var (
 		result    = reflect.MakeMap(typ)
 		keyType   = typ.Key()
@@ -454,7 +467,7 @@ func bindMap(params *Params, name string, typ reflect.Type) reflect.Value {
 		}
 
 		key := paramName[len(name)+1 : len(paramName)-1]
-		result.SetMapIndex(BindValue(key, keyType), BindValue(values[0], valueType))
+		result.SetMapIndex(BindValue(valid, "", key, keyType), BindValue(valid, "", values[0], valueType))
 	}
 	return result
 }
@@ -470,19 +483,19 @@ func unbindMap(output map[string]string, name string, iface interface{}) {
 // Bind takes the name and type of the desired parameter and constructs it
 // from one or more values from Params.
 // Returns the zero value of the type upon any sort of failure.
-func Bind(params *Params, name string, typ reflect.Type) reflect.Value {
+func Bind(params *Params, valid *Validation, name string, typ reflect.Type) reflect.Value {
 	if binder, found := binderForType(typ); found {
-		return binder.Bind(params, name, typ)
+		return binder.Bind(params, valid, name, typ)
 	}
 	return reflect.Zero(typ)
 }
 
-func BindValue(val string, typ reflect.Type) reflect.Value {
-	return Bind(&Params{Values: map[string][]string{"": {val}}}, "", typ)
+func BindValue(valid *Validation, name string, val string, typ reflect.Type) reflect.Value {
+	return Bind(&Params{Values: map[string][]string{"": {val}}}, valid, name, typ)
 }
 
-func BindFile(fileHeader *multipart.FileHeader, typ reflect.Type) reflect.Value {
-	return Bind(&Params{Files: map[string][]*multipart.FileHeader{"": {fileHeader}}}, "", typ)
+func BindFile(valid *Validation, name string, fileHeader *multipart.FileHeader, typ reflect.Type) reflect.Value {
+	return Bind(&Params{Files: map[string][]*multipart.FileHeader{"": {fileHeader}}}, valid, name, typ)
 }
 
 func Unbind(output map[string]string, name string, val interface{}) {

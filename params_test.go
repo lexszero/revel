@@ -126,8 +126,9 @@ func TestBind(t *testing.T) {
 			"x": {"5"},
 		},
 	}
+	valid := Validation{}
 	var x int
-	params.Bind(&x, "x")
+	params.Bind(&x, "x", &valid)
 	if x != 5 {
 		t.Errorf("Failed to bind x.  Value: %d", x)
 	}

@@ -52,80 +52,76 @@ func (v *Validation) ErrorMap() map[string]*ValidationError {
 }
 
 // Add an error to the validation context.
-func (v *Validation) Error(message string, args ...interface{}) *ValidationResult {
-	result := (&ValidationResult{
-		Ok:    false,
-		Error: &ValidationError{},
-	}).Message(message, args...)
-	v.Errors = append(v.Errors, result.Error)
-	return result
+func (v *Validation) Error(message string, args ...interface{}) (error *ValidationError) {
+	error = (&ValidationError{}).SetMessage(message, args...)
+	v.Errors = append(v.Errors, error)
+	return
 }
 
-// A ValidationResult is returned from every validation method.
-// It provides an indication of success, and a pointer to the Error (if any).
-type ValidationResult struct {
-	Error *ValidationError
-	Ok    bool
+func (v *Validation) KeyError(key string, message string, args ...interface{}) (error *ValidationError) {
+	error = v.Error(message, args...)
+	error.Key = key
+	return
 }
 
-func (r *ValidationResult) Key(key string) *ValidationResult {
-	if r.Error != nil {
-		r.Error.Key = key
-	}
-	return r
-}
-
-func (r *ValidationResult) Message(message string, args ...interface{}) *ValidationResult {
-	if r.Error != nil {
+func (e *ValidationError) SetMessage(message string, args ...interface{}) *ValidationError {
+	if e != nil {
 		if len(args) == 0 {
-			r.Error.Message = message
+			e.Message = message
 		} else {
-			r.Error.Message = fmt.Sprintf(message, args)
+			e.Message = fmt.Sprintf(message, args)
 		}
 	}
-	return r
+	return e
+}
+
+func (e *ValidationError) SetKey(key string) *ValidationError {
+	if e != nil {
+		e.Key = key
+	}
+	return e
 }
 
 // Test that the argument is non-nil and non-empty (if string or list)
-func (v *Validation) Required(obj interface{}) *ValidationResult {
+func (v *Validation) Required(obj interface{}) *ValidationError {
 	return v.apply(Required{}, obj)
 }
 
-func (v *Validation) Min(n int, min int) *ValidationResult {
+func (v *Validation) Min(n int, min int) *ValidationError {
 	return v.apply(Min{min}, n)
 }
 
-func (v *Validation) Max(n int, max int) *ValidationResult {
+func (v *Validation) Max(n int, max int) *ValidationError {
 	return v.apply(Max{max}, n)
 }
 
-func (v *Validation) Range(n, min, max int) *ValidationResult {
+func (v *Validation) Range(n, min, max int) *ValidationError {
 	return v.apply(Range{Min{min}, Max{max}}, n)
 }
 
-func (v *Validation) MinSize(obj interface{}, min int) *ValidationResult {
+func (v *Validation) MinSize(obj interface{}, min int) *ValidationError {
 	return v.apply(MinSize{min}, obj)
 }
 
-func (v *Validation) MaxSize(obj interface{}, max int) *ValidationResult {
+func (v *Validation) MaxSize(obj interface{}, max int) *ValidationError {
 	return v.apply(MaxSize{max}, obj)
 }
 
-func (v *Validation) Length(obj interface{}, n int) *ValidationResult {
+func (v *Validation) Length(obj interface{}, n int) *ValidationError {
 	return v.apply(Length{n}, obj)
 }
 
-func (v *Validation) Match(str string, regex *regexp.Regexp) *ValidationResult {
+func (v *Validation) Match(str string, regex *regexp.Regexp) *ValidationError {
 	return v.apply(Match{regex}, str)
 }
 
-func (v *Validation) Email(str string) *ValidationResult {
+func (v *Validation) Email(str string) *ValidationError {
 	return v.apply(Email{Match{emailPattern}}, str)
 }
 
-func (v *Validation) apply(chk Validator, obj interface{}) *ValidationResult {
+func (v *Validation) apply(chk Validator, obj interface{}) *ValidationError {
 	if chk.IsSatisfied(obj) {
-		return &ValidationResult{Ok: true}
+		return nil
 	}
 
 	// Get the default key.
@@ -147,24 +143,20 @@ func (v *Validation) apply(chk Validator, obj interface{}) *ValidationResult {
 	v.Errors = append(v.Errors, err)
 
 	// Also return it in the result.
-	return &ValidationResult{
-		Ok:    false,
-		Error: err,
-	}
+	return err
 }
 
 // Apply a group of validators to a field, in order, and return the
-// ValidationResult from the first one that fails, or the last one that
+// ValidationError from the first one that fails, or the last one that
 // succeeds.
-func (v *Validation) Check(obj interface{}, checks ...Validator) *ValidationResult {
-	var result *ValidationResult
+func (v *Validation) Check(obj interface{}, checks ...Validator) *ValidationError {
+	var err *ValidationError
 	for _, check := range checks {
-		result = v.apply(check, obj)
-		if !result.Ok {
-			return result
+		if err := v.apply(check, obj); err != nil {
+			return err
 		}
 	}
-	return result
+	return err
 }
 
 func ValidationFilter(c *Controller, fc []Filter) {

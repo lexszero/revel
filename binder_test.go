@@ -169,9 +169,10 @@ func TestBinder(t *testing.T) {
 	ParseParams(params, NewRequest(getMultipartRequest()))
 	params.Values = PARAMS
 
+	valid := &Validation{}
 	// Values
 	for k, v := range binderTestCases {
-		actual := Bind(params, k, reflect.TypeOf(v))
+		actual := Bind(params, valid, k, reflect.TypeOf(v))
 		expected := reflect.ValueOf(v)
 		valEq(t, k, actual, expected)
 	}
@@ -198,7 +199,7 @@ func TestBinder(t *testing.T) {
 			// Test binding single files to: *os.File, []byte, io.Reader, io.ReadSeeker
 			for _, binding := range fileBindings {
 				typ := reflect.TypeOf(binding.val).Elem()
-				actual := Bind(params, k, typ)
+				actual := Bind(params, valid, k, typ)
 				if !actual.IsValid() || (actual.Kind() == reflect.Interface && actual.IsNil()) {
 					t.Errorf("%s (%s) - Returned nil.", k, typ)
 					continue
@@ -212,7 +213,7 @@ func TestBinder(t *testing.T) {
 			// []*os.File, [][]byte, []io.Reader, []io.ReadSeeker
 			for _, binding := range fileBindings {
 				typ := reflect.TypeOf(binding.arrval)
-				actual := Bind(params, k, typ)
+				actual := Bind(params, valid, k, typ)
 				if actual.Len() != len(fhs) {
 					t.Fatalf("%s (%s) - Number of files: (expected) %d != %d (actual)",
 						k, typ, len(fhs), actual.Len())
